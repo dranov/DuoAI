@@ -1849,13 +1849,14 @@ def build_mypyvy_main_function(proc_id):
     max_length = trace_dump_config['max_simulate_round_one_process']
     instance_sizes = trace_dump_config['instance_sizes'][proc_id]
 
-    def line(i, sort_bounds):
-        sort_bounds = list(sort_bounds)
-        csv_path = "../../traces/{}_{}/{}.csv".format(PROBLEM, template_increase[0], '-'.join([str(i) for i in sort_bounds]))
-        spec_path = "../../protocols/{}/{}.pyv".format(PROBLEM, PROBLEM)
-        # return f"proc{i} = subprocess.Popen(['python', '/home/dranov/src/mypyvy/src/mypyvy.py', 'trace-dump', '--max-length', '{max_length}', '--sort-bounds', '{sort_bounds}', '--output-file', '{csv_path}', '{spec_path}'], stdout=subprocess.PIPE, stderr=subprocess.PIPE)"
-        return f"proc{i} = subprocess.run(['python', '/home/dranov/src/mypyvy/src/mypyvy.py', 'trace-dump', '--max-length', '{max_length}', '--sort-bounds', '{sort_bounds}', '--output-file', '{csv_path}', '{spec_path}'])"
+    def line(i, instance_size):
+        sort_elems = trace_dump_config['vars_each_type'][tuple(instance_size)]
+        pred_columns = trace_dump_config['predicate_columns_at_size'][tuple(instance_size)]
+        instance_size = list(instance_size)
 
+        csv_path = "../../traces/{}_{}/{}.csv".format(PROBLEM, template_increase[0], '-'.join([str(i) for i in instance_size]))
+        spec_path = "../../protocols/{}/{}.pyv".format(PROBLEM, PROBLEM)
+        return f"proc{i} = subprocess.run(['python', '/home/dranov/src/mypyvy/src/mypyvy.py', 'trace-dump', '--max-length', '{max_length}', '--sort-bounds', '{instance_size}', '--sort-elems', \"{sort_elems}\", '--pred-columns', \"{pred_columns}\", '--output-file', '{csv_path}', '{spec_path}'])"
 
     lines = []
     lines.append('')
@@ -1863,8 +1864,10 @@ def build_mypyvy_main_function(proc_id):
     indent_prefix = '\t'
     for (i, sort_bounds) in enumerate(instance_sizes):
         lines.append(f'{indent_prefix}{line(i, sort_bounds)}')
-    # for (i, _) in enumerate(instance_sizes):
+    for (i, _) in enumerate(instance_sizes):
         # lines.append(f'{indent_prefix}proc{i}.wait()')
+        lines.append(f"{indent_prefix}print('[EXEC]', ' '.join(proc{i}.args))")
+
     lines.append("{}print('Simulation process {} finished.')".format(indent_prefix, proc_id))
 
     lines.append('')
@@ -1884,7 +1887,7 @@ def build_simulate_main_function(proc_id):
     range_each_type = range_each_type_each_proc[proc_id]
     # TODO George: should we pass the whole of `predicate_columns` to mypyvy
     # and eval the columns on the states we get _in_ mypyvy?
-    collate_args_for_mypyvy(list(predicate_columns.keys()), range_each_type_each_proc)
+    collate_args_for_mypyvy(predicate_columns, range_each_type_each_proc)
     for curr_instance_size, predicate_columns_curr_size in predicate_columns.items():
         shelter_provider = False
         # some instance sizes are never simulated but their csv files must exist, shelter_provider = True means this thread will host them (search for "unreal one" in this file)
@@ -1904,9 +1907,6 @@ def build_simulate_main_function(proc_id):
             if not instance_size_belong_to_this_process:
                 continue
 
-        # Register per-process instance sizes
-        trace_dump_config.setdefault('instance_sizes', {}).setdefault(proc_id, []).append(curr_instance_size)
-        
         predicates_list_str = ', '.join(["'{}'".format(s) for s in predicate_columns_curr_size])
         predicates_list_str = predicates_list_str.replace('[0]', '')
         predicates_list_str = predicates_list_str.replace('[', '(').replace(']', ')')
@@ -1918,6 +1918,11 @@ def build_simulate_main_function(proc_id):
         lines.append('{}df = pd.DataFrame(df_data[{}], columns=[{}])'.format(indent_prefix, curr_instance_size, predicates_list_str))
         lines.append('{}df = df.drop_duplicates().astype(int)'.format(indent_prefix))
         lines.append("{}df.to_csv('../../traces/{}_{}/{}.csv', index=False)".format(indent_prefix, PROBLEM, template_increase[0], '-'.join([str(i) for i in curr_instance_size])))
+
+        # Register per-process instance sizes
+        trace_dump_config.setdefault('instance_sizes', {}).setdefault(proc_id, []).append(curr_instance_size)
+        trace_dump_config.setdefault('predicate_columns_at_size', {}).setdefault(curr_instance_size, f"[{predicates_list_str}]")
+
     lines.append('{}end_time = time.time()'.format(indent_prefix))
     lines.append("{}print('Simulation process {} finished.')".format(indent_prefix, proc_id))
     return lines
@@ -2017,8 +2022,14 @@ def translate_ivy_to_python(PROBLEM):
     print('Instrumenting finished. Simulation scripts written to auto_samplers/{}/*.py'.format(PROBLEM))
     print("[TRACE_DUMP]\n{}".format(trace_dump_config))
 
-def collate_args_for_mypyvy(all_instance_sizes=None, range_each_type_each_proc=None, max_simulate_round_one_process=None, vars_each_type=None):
-    if all_instance_sizes is not None:
+def collate_args_for_mypyvy(predicate_columns=None, range_each_type_each_proc=None, max_simulate_round_one_process=None, vars_each_type=None):
+    # NOTE: predicate_columns_at_size has what need to be the actual column
+    # strings in the CSV file. For some reason, there is a discrepancy between
+    # that and predicate_columns.
+
+    if predicate_columns is not None:
+        trace_dump_config['predicate_columns'] = predicate_columns
+        all_instance_sizes = list(map(list, predicate_columns.keys())) # transform instance-size tuples into list
         trace_dump_config['all_instance_sizes'] = all_instance_sizes
     if range_each_type_each_proc is not None:
         trace_dump_config['range_each_type_each_proc'] = range_each_type_each_proc
