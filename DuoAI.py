@@ -47,6 +47,7 @@ class DuoAI:
         self.simulation_ends = [False for _ in range(MAX_TEMPLATE_INCREASE)]
 
     def translate_and_simulate_ivy_protocol(self, curr_template_increase):
+        print("[INFO] curr_template_increase: {}".format(curr_template_increase))
         if curr_template_increase > 0:
             print('Re-simulate protocol with larger instances')
         if self.simulation_starts[curr_template_increase]:  # the other thread has started simulation
@@ -61,6 +62,7 @@ class DuoAI:
             subprocret = subprocess.run(
                 ['python', 'translate.py', self.PROBLEM, '--template_increase={}'.format(curr_template_increase)],
                 cwd='src-py/')
+            print("[EXEC]", ' '.join(subprocret.args))
             if subprocret.returncode != 0:
                 print(
                     'translate.py fails to parse and translate the input Ivy file. Please use $ivy_check PROTOCOL.ivy to '
@@ -71,6 +73,7 @@ class DuoAI:
             running_simulation_procs = []
             for proc_id in range(num_process):
                 proc = subprocess.Popen(['python', '{}_{}.py'.format(self.PROBLEM, proc_id)], cwd='auto_samplers/{}'.format(PROBLEM))
+                print("[EXEC]", ' '.join(proc.args))
                 running_procs.append(proc)
                 running_simulation_procs.append(proc)
             for proc in running_simulation_procs:
@@ -86,6 +89,7 @@ class DuoAI:
         for init_attempt in range(max_retry + 1):
             proc = subprocess.Popen(['./main', self.PROBLEM, '--parallel_instance={}'.format(parallel_instance_str),
                                      '--template_increase={}'.format(curr_template_increase), '--init_attempt={}'.format(init_attempt)], cwd='src-c/')
+            print("[EXEC]", ' '.join(proc.args))
             running_procs.append(proc)
             try:
                 proc.wait(timeout=curr_timeout)

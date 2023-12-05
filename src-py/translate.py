@@ -61,6 +61,9 @@ max_num_exists = [0]  # maximum number of existential quantifiers in one invaria
 range_each_type_each_proc = []  # length: number of parallel processes, element: instance size range (e.g., [2,3,4]) each type
 
 
+# For invoking mypyvy
+trace_dump_config = {}
+
 def parse_type(type_name):
     if len(type_name.split()) > 1:
         print('Invalid type name: {}'.format(type_name))
@@ -1797,6 +1800,7 @@ def build_sample_function():
     lines.append('{}stopping_criteria = simulation_round > {}'.format(indent_prefix, max_simulate_round_one_process))
     lines.append('\tadd_checked_candidates({})'.format(', '.join(['candidate{}'.format(i) for i in range(candidates_to_check_count)])))
     lines.append('\treturn df_data')
+    collate_args_for_mypyvy(None, None, max_simulate_round_one_process, vars_each_type)
     return lines
 
 
@@ -1840,14 +1844,47 @@ def build_instance_generator(proc_id):
     lines.append(return_stmt)
     return lines
 
+def build_mypyvy_main_function(proc_id):
+    '''MUST be called after `build_simulate_main_function`'''
+    max_length = trace_dump_config['max_simulate_round_one_process']
+    instance_sizes = trace_dump_config['instance_sizes'][proc_id]
 
-def build_main_function(proc_id):
+    def line(i, sort_bounds):
+        sort_bounds = list(sort_bounds)
+        csv_path = "../../traces/{}_{}/{}.csv".format(PROBLEM, template_increase[0], '-'.join([str(i) for i in sort_bounds]))
+        spec_path = "../../protocols/{}/{}.pyv".format(PROBLEM, PROBLEM)
+        # return f"proc{i} = subprocess.Popen(['python', '/home/dranov/src/mypyvy/src/mypyvy.py', 'trace-dump', '--max-length', '{max_length}', '--sort-bounds', '{sort_bounds}', '--output-file', '{csv_path}', '{spec_path}'], stdout=subprocess.PIPE, stderr=subprocess.PIPE)"
+        return f"proc{i} = subprocess.run(['python', '/home/dranov/src/mypyvy/src/mypyvy.py', 'trace-dump', '--max-length', '{max_length}', '--sort-bounds', '{sort_bounds}', '--output-file', '{csv_path}', '{spec_path}'])"
+
+
     lines = []
+    lines.append('')
+    lines.append('def mypyvy_main():')
+    indent_prefix = '\t'
+    for (i, sort_bounds) in enumerate(instance_sizes):
+        lines.append(f'{indent_prefix}{line(i, sort_bounds)}')
+    # for (i, _) in enumerate(instance_sizes):
+        # lines.append(f'{indent_prefix}proc{i}.wait()')
+    lines.append("{}print('Simulation process {} finished.')".format(indent_prefix, proc_id))
+
+    lines.append('')
     lines.append("if __name__ == '__main__':")
+    lines.append(f'{indent_prefix}# simulate_main()')
+    lines.append(f'{indent_prefix}mypyvy_main()')
+
+    return lines
+
+def build_simulate_main_function(proc_id):
+    lines = []
+    # lines.append("if __name__ == '__main__':")
+    lines.append('def simulate_main():')
     indent_prefix = '\t'
     lines.append('{}start_time = time.time()'.format(indent_prefix))
     lines.append('{}df_data = sample()'.format(indent_prefix))
     range_each_type = range_each_type_each_proc[proc_id]
+    # TODO George: should we pass the whole of `predicate_columns` to mypyvy
+    # and eval the columns on the states we get _in_ mypyvy?
+    collate_args_for_mypyvy(list(predicate_columns.keys()), range_each_type_each_proc)
     for curr_instance_size, predicate_columns_curr_size in predicate_columns.items():
         shelter_provider = False
         # some instance sizes are never simulated but their csv files must exist, shelter_provider = True means this thread will host them (search for "unreal one" in this file)
@@ -1866,6 +1903,10 @@ def build_main_function(proc_id):
                     break
             if not instance_size_belong_to_this_process:
                 continue
+
+        # Register per-process instance sizes
+        trace_dump_config.setdefault('instance_sizes', {}).setdefault(proc_id, []).append(curr_instance_size)
+        
         predicates_list_str = ', '.join(["'{}'".format(s) for s in predicate_columns_curr_size])
         predicates_list_str = predicates_list_str.replace('[0]', '')
         predicates_list_str = predicates_list_str.replace('[', '(').replace(']', ')')
@@ -1896,13 +1937,14 @@ def write_python_file(simulation_file_path):
     python_codes.extend(build_sample_function())
     add_blank_line()
     calc_proc_id_to_range_each_type()
-    for proc_id in range(len(range_each_type_each_proc)):
+    for proc_id in range(len(range_each_type_each_proc)):    
         proc_python_codes = []
         proc_python_codes.extend(build_add_checked_candidates(proc_id))
         proc_python_codes.append('')
         proc_python_codes.extend(build_instance_generator(proc_id))
         proc_python_codes.append('')
-        proc_python_codes.extend(build_main_function(proc_id))
+        proc_python_codes.extend(build_simulate_main_function(proc_id))
+        proc_python_codes.extend(build_mypyvy_main_function(proc_id))
 
         proc_python_file = '{}/{}_{}.py'.format(simulation_file_path, PROBLEM, proc_id)
         with open(proc_python_file, 'w') as outfile:
@@ -1973,7 +2015,17 @@ def translate_ivy_to_python(PROBLEM):
     write_python_file(simulation_file_path)
     emit_config_file(config_file)
     print('Instrumenting finished. Simulation scripts written to auto_samplers/{}/*.py'.format(PROBLEM))
+    print("[TRACE_DUMP]\n{}".format(trace_dump_config))
 
+def collate_args_for_mypyvy(all_instance_sizes=None, range_each_type_each_proc=None, max_simulate_round_one_process=None, vars_each_type=None):
+    if all_instance_sizes is not None:
+        trace_dump_config['all_instance_sizes'] = all_instance_sizes
+    if range_each_type_each_proc is not None:
+        trace_dump_config['range_each_type_each_proc'] = range_each_type_each_proc
+    if max_simulate_round_one_process is not None:
+        trace_dump_config['max_simulate_round_one_process'] = max_simulate_round_one_process
+    if vars_each_type is not None:
+        trace_dump_config['vars_each_type'] = vars_each_type
 
 if __name__ == '__main__':
     PROBLEM = sys.argv[1]

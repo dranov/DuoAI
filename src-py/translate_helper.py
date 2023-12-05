@@ -132,11 +132,13 @@ def get_ring_initialization_block(element_type):
 
 def get_python_header():
     return ['import numpy as np',
+            'import subprocess',
             'from collections import defaultdict',
             'from scipy.special import comb',
             'import time', 'import pandas as pd',
             'from itertools import product, permutations, combinations',
             'import os',
+            'import sys'
             '',
             'rng = np.random.default_rng(0)',
             'bool_num = 2']
