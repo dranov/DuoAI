@@ -1856,7 +1856,7 @@ def build_mypyvy_main_function(proc_id):
 
         csv_path = "../../traces/{}_{}/{}.csv".format(PROBLEM, template_increase[0], '-'.join([str(i) for i in instance_size]))
         spec_path = "../../protocols/{}/{}.pyv".format(PROBLEM, PROBLEM)
-        return f"proc{i} = subprocess.run(['python', '/home/dranov/src/mypyvy/src/mypyvy.py', 'trace-dump', '--max-length', '{max_length}', '--sort-bounds', '{instance_size}', '--sort-elems', \"{sort_elems}\", '--pred-columns', \"{pred_columns}\", '--output-file', '{csv_path}', '{spec_path}'])"
+        return f"proc{i} = subprocess.run(['python', '/home/dranov/src/mypyvy/src/mypyvy.py', 'trace-dump', '--seed', str(int(time.time())),  '--max-length', '{max_length}', '--sort-bounds', \"{instance_size}\", '--sort-elems', \"{sort_elems}\", '--pred-columns', \"{pred_columns}\", '--output-file', '{csv_path}', '{spec_path}'])"
 
     lines = []
     lines.append('')
@@ -1872,7 +1872,7 @@ def build_mypyvy_main_function(proc_id):
 
     lines.append('')
     lines.append("if __name__ == '__main__':")
-    lines.append(f'{indent_prefix}# simulate_main()')
+    lines.append(f'{indent_prefix}simulate_main()')
     lines.append(f'{indent_prefix}mypyvy_main()')
 
     return lines
@@ -1916,8 +1916,10 @@ def build_simulate_main_function(proc_id):
         predicates_list_str = predicates_list_str.replace('[0]', '')  # for individuals
         predicates_list_str = re.sub('\sor\s.*?\)', '', predicates_list_str)  # for shadow relations
         lines.append('{}df = pd.DataFrame(df_data[{}], columns=[{}])'.format(indent_prefix, curr_instance_size, predicates_list_str))
+        lines.append("{}print(f'DuoAI simulation reached {{len(df)}} states for {}.csv!')".format(indent_prefix, '-'.join([str(i) for i in curr_instance_size])))
         lines.append('{}df = df.drop_duplicates().astype(int)'.format(indent_prefix))
-        lines.append("{}df.to_csv('../../traces/{}_{}/{}.csv', index=False)".format(indent_prefix, PROBLEM, template_increase[0], '-'.join([str(i) for i in curr_instance_size])))
+        lines.append('{}df.sort_values(df.columns.tolist(), inplace=True)'.format(indent_prefix))
+        lines.append("{}df.to_csv('../../traces/{}_{}/{}_sim.csv', index=False)".format(indent_prefix, PROBLEM, template_increase[0], '-'.join([str(i) for i in curr_instance_size])))
 
         # Register per-process instance sizes
         trace_dump_config.setdefault('instance_sizes', {}).setdefault(proc_id, []).append(curr_instance_size)
